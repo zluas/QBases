@@ -78,7 +78,7 @@ jobs:
 
     # 打包并上传产物
     - name: Upload Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: Qt5.12.12-Static-VS2022
         path: C:\Qt\5.12.12-static-msvc2022
