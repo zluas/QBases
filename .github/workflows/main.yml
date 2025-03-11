@@ -1,50 +1,74 @@
-name: Build Qt5.12.12 Static
+name: Build Qt 5.12.12 Static
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  
   push:
     branches: [ main ]
 
 jobs:
-  build:
-    runs-on: windows-latest
-    timeout-minutes: 360
+  build-qt-static:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ ubuntu-20.04, windows-latest ]
 
     steps:
-    - name: Checkout code
+    - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Setup Perl
-      uses: strawberry-tools/setup-perl@v1
-      with:
-        perl-version: '5.32'
 
-    - name: Install dependencies
+    - name: Install Dependencies
+      shell: bash
       run: |
-        choco install python --version=3.8.0
-        choco install jom
+        if [[ "${{ runner.os }}" == "Linux" ]]; then
+          sudo apt-get update
+          sudo apt-get install -y build-essential libgl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libdbus-1-dev libssl-dev
+        elif [[ "${{ runner.os }}" == "Windows" ]]; then
+          choco install -y python --version 3.9.13
+          choco install -y strawberryperl --version 5.32.1.1
+          refreshenv
+        fi
 
-    - name: Extract Qt source
+    - name: Download Qt 5.12.12 Source
       run: |
-        7z x qt-everywhere-src-5.12.12.zip -oqt-src
+        wget https://download.qt.io/archive/qt/5.12/5.12.12/single/qt-everywhere-src-5.12.12.tar.xz
+        tar -xf qt-everywhere-src-5.12.12.tar.xz
+        mv qt-everywhere-src-5.12.12 qt-src
+
+
+    - name: Configure Qt Static Build
+      shell: bash
+      run: |
         cd qt-src
+        if [[ "${{ runner.os }}" == "Linux" ]]; then
+          ./configure -prefix /opt/qt5.12.12-static \
+            -static -release -opensource -confirm-license \
+            -nomake examples -nomake tests \
+            -qt-zlib -qt-libpng -qt-libjpeg -qt-xcb
+        elif [[ "${{ runner.os }}" == "Windows" ]]; then
+          ./configure -prefix C:\qt5.12.12-static ^
+            -static -release -opensource -confirm-license ^
+            -nomake examples -nomake tests ^
+            -qt-zlib -qt-libpng -qt-libjpeg -opengl desktop
+        fi
 
-    - name: Configure Qt
-      env:
-        PATH: ${{ github.workspace }}/qt-src/qtbase/bin;$PATH
+
+    - name: Build and Install
+      shell: bash
       run: |
-        configure.bat -static -static-runtime -prefix "%CD%\qt-static" ^
-          -opensource -confirm-license -platform win32-g++ ^
-          -nomake examples -nomake tests -opengl desktop ^
-          -openssl-linked -I "C:\OpenSSL-Win32\include" -L "C:\OpenSSL-Win32\lib":ml-citation{ref="1,2" data="citationList"}
+        cd qt-src
+        if [[ "${{ runner.os }}" == "Linux" ]]; then
+          make -j$(nproc)
+          sudo make install
+        elif [[ "${{ runner.os }}" == "Windows" ]]; then
+          jom.exe -j $NUMBER_OF_PROCESSORS
+          jom.exe install
+        fi
 
-    - name: Compile Qt
-      run: |
-        jom -j 4
-        jom install
 
-    - name: Upload artifact
+    - name: Upload Artifact
       uses: actions/upload-artifact@v2
       with:
-        name: qt5.12.12-static
-        path: qt-src/qt-static
+        name: qt5.12.12-static-${{ runner.os }}
+        path: |
+          ${{ runner.os == 'Linux' && '/opt/qt5.12.12-static' || 'C:\qt5.12.12-static' }}
