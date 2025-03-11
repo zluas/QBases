@@ -1,7 +1,7 @@
 name: Build Qt5.12.12 Static
 
 on:
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
   push:
     branches: [ main ]
 
@@ -44,7 +44,7 @@ jobs:
         jom install
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v2
       with:
         name: qt5.12.12-static
         path: qt-src/qt-static
