@@ -1,0 +1,50 @@
+name: Build Qt5.12.12 Static
+
+on:
+  workflow_dispatch:  # 允许手动触发
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Perl
+      uses: strawberry-tools/setup-perl@v1
+      with:
+        perl-version: '5.32'
+
+    - name: Install dependencies
+      run: |
+        choco install python --version=3.8.0
+        choco install jom
+
+    - name: Extract Qt source
+      run: |
+        7z x qt-everywhere-src-5.12.12.zip -oqt-src
+        cd qt-src
+
+    - name: Configure Qt
+      env:
+        PATH: ${{ github.workspace }}/qt-src/qtbase/bin;$PATH
+      run: |
+        configure.bat -static -static-runtime -prefix "%CD%\qt-static" ^
+          -opensource -confirm-license -platform win32-g++ ^
+          -nomake examples -nomake tests -opengl desktop ^
+          -openssl-linked -I "C:\OpenSSL-Win32\include" -L "C:\OpenSSL-Win32\lib":ml-citation{ref="1,2" data="citationList"}
+
+    - name: Compile Qt
+      run: |
+        jom -j 4
+        jom install
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: qt5.12.12-static
+        path: qt-src/qt-static
