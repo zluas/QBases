@@ -25,8 +25,8 @@ jobs:
     - name: Install Dependencies
       shell: powershell
       run: |
-        choco install -y --no-progress strawberryperl --version 5.32.1.1
-        choco install -y --no-progress python --version 3.9.13
+        choco install -y --no-progress strawberryperl
+        choco install -y --no-progress python
         refreshenv
 
     # 配置 VS2022 开发环境
