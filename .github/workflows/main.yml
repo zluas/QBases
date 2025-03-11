@@ -5,81 +5,122 @@ on:
   push:
     branches: [ main ]
 
+env:
+  QT_VERSION: 5.12.12
+  QT_SOURCE_URL: https://download.qt.io/archive/qt/5.12/$QT_VERSION/single/qt-everywhere-src-$QT_VERSION.tar.xz
+
 jobs:
   build-qt-static:
-    runs-on: windows-2022  # 使用预装 VS2022 的 GitHub 运行器
+    runs-on: windows-2022
+    timeout-minutes: 240  # 编译耗时较长，设置超时为4小时
 
     steps:
+    # ================= 初始化阶段 =================
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 安装 Chocolatey 包管理器
+    # ================= 依赖安装阶段 =================
     - name: Install Chocolatey
       shell: powershell
       run: |
         Set-ExecutionPolicy Bypass -Scope Process -Force
-        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        Write-Host "Chocolatey installed to: $env:ChocolateyInstall"
 
-    # 安装编译依赖
-    - name: Install Dependencies
+    - name: Install Build Dependencies
       shell: powershell
       run: |
-        choco install -y --no-progress strawberryperl
-        choco install -y --no-progress python
+        # 安装指定版本依赖
+        choco install -y --no-progress --version=5.32.1.1 strawberryperl
+        choco install -y --no-progress --version=3.9.13 python
+        choco install -y --no-progress 7zip
+        choco install -y --no-progress jom
+
+        # 强制刷新环境变量
+        Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+        Update-SessionEnvironment
         refreshenv
 
-    # 配置 VS2022 开发环境
-    - name: Setup MSVC Environment
+        # 验证工具链
+        Write-Host "Python path: $(Get-Command python)"
+        Write-Host "Perl path: $(Get-Command perl)"
+        Write-Host "7z version: $(7z | Select-String 'Version')"
+
+    # ================= 编译环境配置 =================
+    - name: Setup MSVC 2022 Environment
       uses: ilammy/msvc-dev-cmd@v1
       with:
-        arch: x64  # 支持 x86/x64/ARM64
+        arch: x64
+        sdk: latest
+        toolset: 14.3  # VS2022 工具链版本
+        vs-version: 2022
 
-    # 缓存 Qt 源码（减少重复下载）
+    # ================= 源码管理阶段 =================
     - name: Cache Qt Source
       uses: actions/cache@v3
-      id: cache-qt
+      id: qt-source-cache
       with:
         path: |
           qt-src/
-          qt-everywhere-src-5.12.12.tar.xz
-        key: ${{ runner.os }}-qt-5.12.12-source
+          qt-everywhere-src-${{ env.QT_VERSION }}.tar.xz
+        key: qt-${{ env.QT_VERSION }}-source-${{ hashFiles('.github/workflows/build-qt-static.yml') }}
 
-    # 下载并解压 Qt 源码
-    - name: Download Qt Source
-      if: steps.cache-qt.outputs.cache-hit != 'true'
+    - name: Download and Extract Qt Source
+      if: steps.qt-source-cache.outputs.cache-hit != 'true'
       shell: cmd
       run: |
-        curl -L -o qt-everywhere-src-5.12.12.tar.xz https://download.qt.io/archive/qt/5.12/5.12.12/single/qt-everywhere-src-5.12.12.tar.xz
-        7z x qt-everywhere-src-5.12.12.tar.xz
-        7z x qt-everywhere-src-5.12.12.tar
-        ren qt-everywhere-src-5.12.12 qt-src
+        curl -L -o qt-everywhere-src-%QT_VERSION%.tar.xz "%QT_SOURCE_URL%"
+        7z x qt-everywhere-src-%QT_VERSION%.tar.xz
+        7z x qt-everywhere-src-%QT_VERSION%.tar
+        ren qt-everywhere-src-%QT_VERSION% qt-src
 
-    # 配置静态编译参数
-    - name: Configure Qt
+    # ================= 编译配置阶段 =================
+    - name: Configure Qt Build
       shell: cmd
       run: |
         cd qt-src
         configure.bat -static -release -opensource -confirm-license ^
-          -prefix "C:\Qt\5.12.12-static-msvc2022" ^
+          -prefix "C:\Qt\%QT_VERSION%-static-msvc2022" ^
           -platform win32-msvc ^
           -nomake examples -nomake tests ^
           -qt-zlib -qt-libpng -qt-libjpeg ^
           -opengl desktop -mp ^
-          -skip webengine -skip qtwebengine -skip qtwebview
+          -skip webengine -skip qtwebengine -skip qtwebview ^
+          -no-feature-sql -no-feature-xml -no-feature-network
 
-    # 编译 Qt（使用 jom 加速）
-    - name: Build Qt
+        # 生成并行编译配置
+        jom -f Makefile qmake_all
+
+    # ================= 编译阶段 =================
+    - name: Build Qt (Parallel)
       shell: cmd
       run: |
         cd qt-src
         jom -j %NUMBER_OF_PROCESSORS%
         jom install
 
-    # 打包并上传产物
+    # ================= 产物处理阶段 =================
+    - name: Verify Static Libraries
+      shell: cmd
+      run: |
+        dir /s /b C:\Qt\%QT_VERSION%-static-msvc2022\lib\*.lib
+        if not exist C:\Qt\%QT_VERSION%-static-msvc2022\bin\qmake.exe (
+          exit 1
+        )
+
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Qt5.12.12-Static-VS2022
-        path: C:\Qt\5.12.12-static-msvc2022
+        name: Qt-${{ env.QT_VERSION }}-Static-VS2022
+        path: C:\Qt\${{ env.QT_VERSION }}-static-msvc2022
         retention-days: 7
+        compression-level: 0  # 静态库本身已压缩，禁用二次压缩
+
+    # ================= 清理阶段 =================
+    - name: Cleanup Build Files
+      if: always()
+      shell: cmd
+      run: |
+        rmdir /s /q qt-src
+        del qt-everywhere-src-%QT_VERSION%.tar.xz
