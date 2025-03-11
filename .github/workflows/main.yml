@@ -7,7 +7,7 @@ on:
 
 env:
   QT_VERSION: 5.12.12
-  QT_SOURCE_URL: https://download.qt.io/archive/qt/5.12/$QT_VERSION/single/qt-everywhere-src-$QT_VERSION.tar.xz
+  QT_SOURCE_URL: https://download.qt.io/archive/qt/5.12/5.12.12/single/qt-everywhere-src-5.12.12.zip
 
 jobs:
   build-qt-static:
