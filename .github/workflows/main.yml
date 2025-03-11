@@ -1,74 +1,85 @@
-name: Build Qt 5.12.12 Static
+name: Build Qt 5.12.12 Static (VS2022)
 
 on:
-  workflow_dispatch:  
+  workflow_dispatch:  # 允许手动触发
   push:
     branches: [ main ]
 
 jobs:
   build-qt-static:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ ubuntu-20.04, windows-latest ]
+    runs-on: windows-2022  # 使用预装 VS2022 的 GitHub 运行器
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    # 安装 Chocolatey 包管理器
+    - name: Install Chocolatey
+      shell: powershell
+      run: |
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
 
+    # 安装编译依赖
     - name: Install Dependencies
-      shell: bash
+      shell: powershell
       run: |
-        if [[ "${{ runner.os }}" == "Linux" ]]; then
-          sudo apt-get update
-          sudo apt-get install -y build-essential libgl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libdbus-1-dev libssl-dev
-        elif [[ "${{ runner.os }}" == "Windows" ]]; then
-          choco install -y python --version 3.9.13
-          choco install -y strawberryperl --version 5.32.1.1
-          refreshenv
-        fi
+        choco install -y --no-progress strawberryperl --version 5.32.1.1
+        choco install -y --no-progress python --version 3.9.13
+        refreshenv
 
-    - name: Download Qt 5.12.12 Source
-      run: |
-        wget https://download.qt.io/archive/qt/5.12/5.12.12/single/qt-everywhere-src-5.12.12.tar.xz
-        tar -xf qt-everywhere-src-5.12.12.tar.xz
-        mv qt-everywhere-src-5.12.12 qt-src
-
-
-    - name: Configure Qt Static Build
-      shell: bash
-      run: |
-        cd qt-src
-        if [[ "${{ runner.os }}" == "Linux" ]]; then
-          ./configure -prefix /opt/qt5.12.12-static \
-            -static -release -opensource -confirm-license \
-            -nomake examples -nomake tests \
-            -qt-zlib -qt-libpng -qt-libjpeg -qt-xcb
-        elif [[ "${{ runner.os }}" == "Windows" ]]; then
-          ./configure -prefix C:\qt5.12.12-static ^
-            -static -release -opensource -confirm-license ^
-            -nomake examples -nomake tests ^
-            -qt-zlib -qt-libpng -qt-libjpeg -opengl desktop
-        fi
-
-
-    - name: Build and Install
-      shell: bash
-      run: |
-        cd qt-src
-        if [[ "${{ runner.os }}" == "Linux" ]]; then
-          make -j$(nproc)
-          sudo make install
-        elif [[ "${{ runner.os }}" == "Windows" ]]; then
-          jom.exe -j $NUMBER_OF_PROCESSORS
-          jom.exe install
-        fi
-
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v2
+    # 配置 VS2022 开发环境
+    - name: Setup MSVC Environment
+      uses: ilammy/msvc-dev-cmd@v1
       with:
-        name: qt5.12.12-static-${{ runner.os }}
+        arch: x64  # 支持 x86/x64/ARM64
+
+    # 缓存 Qt 源码（减少重复下载）
+    - name: Cache Qt Source
+      uses: actions/cache@v3
+      id: cache-qt
+      with:
         path: |
-          ${{ runner.os == 'Linux' && '/opt/qt5.12.12-static' || 'C:\qt5.12.12-static' }}
+          qt-src/
+          qt-everywhere-src-5.12.12.tar.xz
+        key: ${{ runner.os }}-qt-5.12.12-source
+
+    # 下载并解压 Qt 源码
+    - name: Download Qt Source
+      if: steps.cache-qt.outputs.cache-hit != 'true'
+      shell: cmd
+      run: |
+        curl -L -o qt-everywhere-src-5.12.12.tar.xz https://download.qt.io/archive/qt/5.12/5.12.12/single/qt-everywhere-src-5.12.12.tar.xz
+        7z x qt-everywhere-src-5.12.12.tar.xz
+        7z x qt-everywhere-src-5.12.12.tar
+        ren qt-everywhere-src-5.12.12 qt-src
+
+    # 配置静态编译参数
+    - name: Configure Qt
+      shell: cmd
+      run: |
+        cd qt-src
+        configure.bat -static -release -opensource -confirm-license ^
+          -prefix "C:\Qt\5.12.12-static-msvc2022" ^
+          -platform win32-msvc ^
+          -nomake examples -nomake tests ^
+          -qt-zlib -qt-libpng -qt-libjpeg ^
+          -opengl desktop -mp ^
+          -skip webengine -skip qtwebengine -skip qtwebview
+
+    # 编译 Qt（使用 jom 加速）
+    - name: Build Qt
+      shell: cmd
+      run: |
+        cd qt-src
+        jom -j %NUMBER_OF_PROCESSORS%
+        jom install
+
+    # 打包并上传产物
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: Qt5.12.12-Static-VS2022
+        path: C:\Qt\5.12.12-static-msvc2022
+        retention-days: 7
