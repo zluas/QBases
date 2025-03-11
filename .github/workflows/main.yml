@@ -47,14 +47,13 @@ jobs:
         Write-Host "Perl path: $(Get-Command perl)"
         Write-Host "7z version: $(7z | Select-String 'Version')"
 
-    # ================= 编译环境配置 =================
-    - name: Setup MSVC 2022 Environment
+    # ========== 编译环境配置 ==========
+    - name: Setup MSVC 2022
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: x64
-        sdk: latest
-        toolset: 14.3  # VS2022 工具链版本
         vs-version: 2022
+        toolset: 14.3
 
     # ================= 源码管理阶段 =================
     - name: Cache Qt Source
